@@ -1,5 +1,5 @@
 # CardioViz 3D - Cardiovascular Risk Visualization & Prediction
-Multimodal AI Hackathon 2026, Track A (BioTech). Team: SparkCoders
+Multimodal AI Hackathon 2026, Track A (BioTech). Team: Chukka Sujeeva Bharathi
 
 **Predictions are for decision support / educational purposes only and are NOT a substitute for formal diagnostic imaging or a doctor.**
 
