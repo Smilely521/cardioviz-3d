@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>CardioViz 3D</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#10151c;color:#e8eaed}
+.warn{background:#b71c1c;color:#fff;padding:8px 14px;font-size:14px;text-align:center}
+.wrap{display:flex;flex-wrap:wrap}
+#view{flex:2;min-width:320px;height:560px}
+#panel{flex:1;min-width:300px;padding:14px}
+.bar{background:#2a313b;border-radius:4px;height:14px;margin:2px 0 8px}
+.fill{height:14px;border-radius:4px}
+.row{cursor:pointer;padding:4px 6px;border-radius:6px}
+.row.sel{background:#243040}
+select{font-size:16px;padding:4px}
+small{color:#9aa4b2}
+</style></head><body>
+<div class="warn">Predictions are for decision support / educational purposes only and are NOT a substitute for formal diagnostic imaging or a doctor.</div>
+<div class="wrap">
+<div id="view"></div>
+<div id="panel">
+<h2 style="margin-top:0">CardioViz 3D</h2>
+<label>Patient: <select id="pat"></select></label>
+<p><small>Rotate: drag. Zoom: scroll. Click an artery (or a row) to see why.</small></p>
+<div id="bars"></div>
+<h3 id="exTitle"></h3>
+<div id="ex"></div>
+<p><small>Colors: green = low risk, yellow = medium, red = high stenosis probability (cross-validated Random Forest + SHAP).</small></p>
+</div></div>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+<script src="data.js"></script>
+<script>
+const NAMES={Cath:"Overall CAD",LAD:"LAD",LCX:"LCX",RCA:"RCA"};
+const view=document.getElementById("view");
+const W=()=>view.clientWidth,H=()=>view.clientHeight;
+const scene=new THREE.Scene();
+const cam=new THREE.PerspectiveCamera(45,W()/H(),0.1,100);cam.position.set(0,0,6.5);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(W(),H());renderer.setClearColor(0x10151c);view.appendChild(renderer.domElement);
+scene.add(new THREE.AmbientLight(0xffffff,0.7));
+const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(3,4,6);scene.add(dl);
+const controls=new THREE.OrbitControls(cam,renderer.domElement);
+
+const pts=[];
+for(let i=0;i<=100;i++){const t=i/100*2*Math.PI;
+ pts.push(new THREE.Vector2(16*Math.pow(Math.sin(t),3)*0.1,(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))*0.1));}
+const geo=new THREE.ExtrudeGeometry(new THREE.Shape(pts),{depth:1,bevelEnabled:true,bevelThickness:0.2,bevelSize:0.15,bevelSegments:6,curveSegments:40});
+geo.center();
+const group=new THREE.Group();
+group.add(new THREE.Mesh(geo,new THREE.MeshPhongMaterial({color:0x9c4a4a,transparent:true,opacity:0.92})));
+
+const z=0.8;
+const paths={
+ LAD:[[0.2,0.8],[0.3,0.1],[0.25,-0.6],[0.1,-1.2]],
+ LCX:[[0.2,0.8],[0.7,0.8],[1.0,0.4],[1.0,-0.2]],
+ RCA:[[-0.2,0.8],[-0.7,0.8],[-1.0,0.4],[-1.0,-0.2],[-0.6,-0.8]]
+};
+const tubes={};
+for(const k in paths){
+ const curve=new THREE.CatmullRomCurve3(paths[k].map(p=>new THREE.Vector3(p[0],p[1],z)));
+ const m=new THREE.Mesh(new THREE.TubeGeometry(curve,40,0.09,12,false),new THREE.MeshPhongMaterial({color:0x2ecc71}));
+ m.userData.name=k;tubes[k]=m;group.add(m);
+}
+scene.add(group);
+
+function col(p){
+ const g=new THREE.Color(0x2ecc71),y=new THREE.Color(0xf1c40f),r=new THREE.Color(0xe53935);
+ return p<0.5?g.lerp(y,p*2):y.lerp(r,(p-0.5)*2);
+}
+let sel="Cath";
+const pat=document.getElementById("pat");
+DATA.forEach((d,i)=>{const o=document.createElement("option");o.value=i;o.text="Patient "+d.id;pat.appendChild(o);});
+pat.onchange=update;
+
+function update(){
+ const d=DATA[+pat.value];
+ for(const k in tubes){tubes[k].material.color.copy(col(d[k].p));}
+ let h="";
+ for(const k of ["Cath","LAD","LCX","RCA"]){
+  const p=d[k].p,c="#"+col(p).getHexString();
+  h+=`<div class="row ${k===sel?"sel":""}" onclick="pick('${k}')"><b>${NAMES[k]}</b>: ${(p*100).toFixed(0)}% <small>(dataset says: ${d[k].actual?"disease":"normal"})</small><div class="bar"><div class="fill" style="width:${p*100}%;background:${c}"></div></div></div>`;
+ }
+ document.getElementById("bars").innerHTML=h;
+ document.getElementById("exTitle").innerText="Why: "+NAMES[sel]+" prediction";
+ document.getElementById("ex").innerHTML=d[sel].top.map(t=>`<div>${t[0]} = ${t[2]} <b style="color:${t[1]>0?"#ff6b6b":"#5dd39e"}">${t[1]>0?"raises":"lowers"} risk (${t[1]>0?"+":""}${t[1]})</b></div>`).join("");
+}
+window.pick=k=>{sel=k;update();};
+update();
+
+const ray=new THREE.Raycaster(),mouse=new THREE.Vector2();
+renderer.domElement.addEventListener("click",e=>{
+ const r=renderer.domElement.getBoundingClientRect();
+ mouse.x=((e.clientX-r.left)/r.width)*2-1;mouse.y=-((e.clientY-r.top)/r.height)*2+1;
+ ray.setFromCamera(mouse,cam);
+ const hit=ray.intersectObjects(Object.values(tubes));
+ if(hit.length){sel=hit[0].object.userData.name;update();}
+});
+window.addEventListener("resize",()=>{cam.aspect=W()/H();cam.updateProjectionMatrix();renderer.setSize(W(),H());});
+(function loop(t){requestAnimationFrame(loop);const s=1+0.02*Math.sin(t/220);group.scale.set(s,s,s);controls.update();renderer.render(scene,cam);})(0);
+</script></body></html>
